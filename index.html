@@ -542,13 +542,16 @@ function wire(){
     const income=parseFloat(document.getElementById('chkAmt')?.value);
     const date=document.getElementById('chkDt')?.value||tod();
     if(!income||isNaN(income)){alert('Please enter your paycheck amount.');return}
+    const chkId=uid();
     const lines=S.allocations.map(a=>({
       ruleId:a.id,name:a.name,color:a.color,
       planned:a.type==='percent'?Math.round(income*a.value)/100:a.value,
       actual:null,
     }));
-    S.paychecks.push({id:uid(),date,income,lines});
-    S.sheet=null;sv(SK.checks,S.paychecks);render();
+    S.paychecks.push({id:chkId,date,income,lines});
+    // Auto-add income transaction so Overview reflects it immediately
+    S.transactions.push({id:uid(),description:'Paycheck',amount:income,date,type:'income',category:S.categories[0]?.id||'',paycheckId:chkId});
+    S.sheet=null;sv(SK.checks,S.paychecks);sv(SK.tx,S.transactions);render();
   });
   document.querySelectorAll('[data-vcheck]').forEach(b=>b.addEventListener('click',()=>{
     S.viewCheckId=b.dataset.vcheck;S.sheet='viewCheck';render();
@@ -561,12 +564,25 @@ function wire(){
       const v=parseFloat(inp.value);
       chk.lines[i].actual=isNaN(v)?null:v;
     });
-    sv(SK.checks,S.paychecks);S.sheet=null;render();
+    // Replace any expense transactions from this paycheck with fresh ones
+    S.transactions=S.transactions.filter(t=>!(t.paycheckId===chk.id&&t.type==='expense'));
+    const fallbackCat=S.categories.find(c=>c.name.toLowerCase()==='other')||S.categories[S.categories.length-1]||S.categories[0];
+    chk.lines.forEach(l=>{
+      if(l.actual==null||l.actual<=0)return;
+      // Best-effort name match to a budget category; falls back to Other
+      const matchCat=S.categories.find(c=>
+        c.name.toLowerCase().includes(l.name.toLowerCase().slice(0,4))||
+        l.name.toLowerCase().includes(c.name.toLowerCase().slice(0,4))
+      )||fallbackCat;
+      S.transactions.push({id:uid(),description:l.name,amount:l.actual,date:chk.date,type:'expense',category:matchCat?.id||'',paycheckId:chk.id});
+    });
+    sv(SK.checks,S.paychecks);sv(SK.tx,S.transactions);S.sheet=null;render();
   });
   on('delCheck',()=>{
     if(!confirm('Delete this paycheck record?'))return;
+    S.transactions=S.transactions.filter(t=>t.paycheckId!==S.viewCheckId);
     S.paychecks=S.paychecks.filter(c=>c.id!==S.viewCheckId);
-    S.sheet=null;sv(SK.checks,S.paychecks);render();
+    S.sheet=null;sv(SK.checks,S.paychecks);sv(SK.tx,S.transactions);render();
   });
 }
 
